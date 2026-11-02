@@ -4,9 +4,9 @@ Item {
     id: root
 
     property bool active: false
-    property bool continuous: false // If true, loops endlessly (demanding attention)
+    property bool continuous: false // Loops endlessly (demanding attention or startup)
     property int maxBounces: 3
-    property real maxBounceHeight: 28
+    property real maxBounceHeight: 20
     property real currentYOffset: 0
     property real shadowOpacity: Math.max(0.2, 1.0 - (-currentYOffset / maxBounceHeight))
     property real shadowScale: Math.max(0.5, 1.0 - (-currentYOffset / (maxBounceHeight * 1.5)))
@@ -65,7 +65,6 @@ Item {
                             root.active = false;
                             root.finished();
                         } else {
-                            // Damped height for next bounce
                             var dampFactor = Math.pow(0.65, root.bounceIndex);
                             bounceUp.to = -root.maxBounceHeight * dampFactor;
                             bounceDown.from = bounceUp.to;

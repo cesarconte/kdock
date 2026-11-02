@@ -4,8 +4,8 @@ QtObject {
     id: engine
 
     property bool enabled: true
-    property real maxScale: 1.65
-    property real radiusFactor: 2.6
+    property real maxScale: 1.55
+    property real radiusFactor: 2.5
     property real mouseX: -1
     property bool isHovered: false
 
