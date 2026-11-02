@@ -65,5 +65,9 @@
       <label>Play subtle audio feedback via PipeWire</label>
       <default>true</default>
     </entry>
+    <entry name="enableMagicLamp" type="Bool">
+      <label>Enable macOS Genie Magic Lamp minimize animation in KWin</label>
+      <default>true</default>
+    </entry>
   </group>
 </kcfg>

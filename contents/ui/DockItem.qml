@@ -17,27 +17,73 @@ Item {
     property var launcherUrl: ""
     property bool isRunning: false
     property bool isFocused: false
+    property bool isMinimized: false
+    property bool isStartup: false
     property bool demandsAttention: false
     property int badgeNumber: 0
 
     signal activated()
     signal contextRequested(real globalX, real globalY)
     signal launchTriggered()
+    signal geometryChangedCallback()
 
     width: baseSize
     height: baseSize
 
+    onXChanged: geometryChangedCallback()
+    onYChanged: geometryChangedCallback()
+    onWidthChanged: geometryChangedCallback()
+    onHeightChanged: geometryChangedCallback()
+    Component.onCompleted: geometryChangedCallback()
+
     BounceAnimator {
         id: bounceAnimator
         maxBounceHeight: root.baseSize * 0.45
-        continuous: root.demandsAttention
+        continuous: root.demandsAttention || root.isStartup
     }
 
     onDemandsAttentionChanged: {
         if (demandsAttention) {
             bounceAnimator.startBounce(true);
-        } else if (bounceAnimator.active && bounceAnimator.continuous) {
+        } else if (bounceAnimator.active && !root.isStartup) {
             bounceAnimator.stopBounce();
+        }
+    }
+
+    onIsStartupChanged: {
+        if (isStartup) {
+            bounceAnimator.startBounce(true);
+        } else if (bounceAnimator.active && !root.demandsAttention) {
+            bounceAnimator.stopBounce();
+        }
+    }
+
+    // Absorption pulse animation when window is minimized into the dock
+    SequentialAnimation {
+        id: absorbAnim
+        running: false
+
+        NumberAnimation {
+            target: scalingWrapper
+            property: "absorbScale"
+            from: 1.0
+            to: 1.12
+            duration: 150
+            easing.type: Easing.OutQuad
+        }
+        NumberAnimation {
+            target: scalingWrapper
+            property: "absorbScale"
+            from: 1.12
+            to: 1.0
+            duration: 220
+            easing.type: Easing.OutBack
+        }
+    }
+
+    onIsMinimizedChanged: {
+        if (isMinimized) {
+            absorbAnim.restart();
         }
     }
 
@@ -58,12 +104,13 @@ Item {
     Item {
         id: scalingWrapper
         anchors.fill: parent
+        property real absorbScale: 1.0
 
         transform: Scale {
             origin.x: scalingWrapper.width / 2
             origin.y: scalingWrapper.height - 4
-            xScale: root.currentScale
-            yScale: root.currentScale
+            xScale: root.currentScale * scalingWrapper.absorbScale
+            yScale: root.currentScale * scalingWrapper.absorbScale
         }
 
         Item {
@@ -80,6 +127,11 @@ Item {
                 height: root.baseSize * 0.82
                 source: root.iconSource
                 smooth: true
+                opacity: root.isMinimized ? 0.78 : 1.0
+
+                Behavior on opacity {
+                    NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
+                }
             }
 
             // Notification Badge (macOS red circle/pill with white number)

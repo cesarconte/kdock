@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
+import org.kde.plasma.plasma5support as Plasma5Support
 import org.kde.kirigami as Kirigami
 import org.kde.taskmanager as TaskManager
 
@@ -24,6 +25,7 @@ PlasmoidItem {
     readonly property bool showTrash: Plasmoid.configuration.showTrash !== undefined ? Plasmoid.configuration.showTrash : true
     readonly property int dockThemeStyle: Plasmoid.configuration.dockThemeStyle || 0
     readonly property bool soundFeedback: Plasmoid.configuration.soundFeedback !== undefined ? Plasmoid.configuration.soundFeedback : true
+    readonly property bool enableMagicLamp: Plasmoid.configuration.enableMagicLamp !== undefined ? Plasmoid.configuration.enableMagicLamp : true
 
     // Layout dimensions: allocate vertical clearance for smooth magnification and tooltip without clipping
     readonly property real dockBarHeight: root.iconSize + 14
@@ -42,6 +44,35 @@ PlasmoidItem {
     AudioEffects {
         id: audioEffects
         soundEnabled: root.soundFeedback
+    }
+
+    // KWin Magic Lamp (macOS Genie effect) integration
+    Plasma5Support.DataSource {
+        id: kwinEffectRunner
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(sourceName, data) {
+            disconnectSource(sourceName);
+        }
+    }
+
+    function syncMagicLampEffect() {
+        if (root.enableMagicLamp) {
+            kwinEffectRunner.connectSource(
+                "kwriteconfig6 --file kwinrc --group Plugins --key magiclampEnabled true && " +
+                "kwriteconfig6 --file kwinrc --group Plugins --key scaleEnabled false && " +
+                "kwriteconfig6 --file kwinrc --group Plugins --key squashEnabled false && " +
+                "qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect magiclamp 2>/dev/null &"
+            );
+        }
+    }
+
+    Component.onCompleted: {
+        syncMagicLampEffect();
+    }
+
+    onEnableMagicLampChanged: {
+        syncMagicLampEffect();
     }
 
     TaskManager.TasksModel {
@@ -115,6 +146,8 @@ PlasmoidItem {
                     launcherUrl: model.LauncherUrl || ""
                     isRunning: model.IsWindow === true
                     isFocused: model.IsActive === true
+                    isMinimized: model.IsMinimized === true
+                    isStartup: model.IsStartup === true
                     demandsAttention: model.IsDemandingAttention === true
                     badgeNumber: 0
 
@@ -122,6 +155,17 @@ PlasmoidItem {
                         if (!root.enableMagnification) return 1.0;
                         var centerInRow = taskDelegate.x + (taskDelegate.width / 2);
                         return magEngine.calculateScale(centerInRow, root.iconSize);
+                    }
+
+                    function publishGeometryToKWin() {
+                        var p = taskDelegate.mapToGlobal(0, 0);
+                        var r = Qt.rect(p.x, p.y, taskDelegate.width, taskDelegate.height);
+                        var idx = tasksModel.index(modelIndex, 0);
+                        tasksModel.requestPublishDelegateGeometry(idx, r, taskDelegate);
+                    }
+
+                    onGeometryChangedCallback: {
+                        publishGeometryToKWin();
                     }
 
                     onActivated: {

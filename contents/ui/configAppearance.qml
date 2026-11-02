@@ -9,6 +9,7 @@ Kirigami.FormLayout {
 
     property alias cfg_dockThemeStyle: themeComboBox.currentIndex
     property alias cfg_glassBlurRadius: blurSlider.value
+    property alias cfg_enableMagicLamp: magicLampCheckBox.checked
 
     QQC2.ComboBox {
         id: themeComboBox
@@ -26,5 +27,11 @@ Kirigami.FormLayout {
         from: 12
         to: 64
         stepSize: 4
+    }
+
+    QQC2.CheckBox {
+        id: magicLampCheckBox
+        Kirigami.FormData.label: i18n("Window Minimize:")
+        text: i18n("Enable macOS Genie effect (Magic Lamp) in KWin")
     }
 }
