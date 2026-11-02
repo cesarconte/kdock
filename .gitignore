@@ -1,0 +1,13 @@
+# Build and cache
+build/
+*.qmlc
+*.jsc
+.kdev4/
+*.kdev4
+.cache/
+.vscode/
+.idea/
+
+# System and logs
+*.log
+.DS_Store

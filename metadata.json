@@ -1,0 +1,23 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "cesar@cachyos.local",
+                "Name": "Cesar Conte"
+            }
+        ],
+        "Category": "Windows and Tasks",
+        "Description": "macOS Sequoia-style modern Dock plasmoid for KDE Plasma 6 Wayland with parabolic magnification, bounce animations, stacks, and trash support",
+        "Icon": "preferences-system-windows",
+        "Id": "org.cesar.kdock",
+        "License": "GPL-3.0+",
+        "Name": "kDock",
+        "Version": "1.0.0",
+        "Website": "https://github.com/cesarconte/kdock"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-Provides": [
+        "org.kde.plasma.multitasking"
+    ]
+}
