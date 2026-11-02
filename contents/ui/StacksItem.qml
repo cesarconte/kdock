@@ -19,11 +19,27 @@ Item {
     width: baseSize
     height: baseSize
 
-    transform: Scale {
-        origin.x: root.width / 2
-        origin.y: root.height
-        xScale: root.currentScale
-        yScale: root.currentScale
+    Item {
+        id: scalingWrapper
+        anchors.fill: parent
+
+        transform: Scale {
+            origin.x: scalingWrapper.width / 2
+            origin.y: scalingWrapper.height - 4
+            xScale: root.currentScale
+            yScale: root.currentScale
+        }
+
+        Kirigami.Icon {
+            id: iconDisplay
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: 2
+            width: root.baseSize * 0.82
+            height: root.baseSize * 0.82
+            source: root.folderIcon
+            smooth: true
+        }
     }
 
     Plasma5Support.DataSource {
@@ -98,15 +114,6 @@ Item {
         }
     }
 
-    Kirigami.Icon {
-        id: iconDisplay
-        anchors.centerIn: parent
-        width: parent.width * 0.85
-        height: parent.height * 0.85
-        source: root.folderIcon
-        smooth: true
-    }
-
     MouseArea {
         id: mouseArea
         anchors.fill: parent
@@ -149,7 +156,7 @@ Item {
 
         background: Rectangle {
             radius: 16
-            color: Qt.rgba(0.12, 0.13, 0.16, 0.88)
+            color: Qt.rgba(0.12, 0.13, 0.16, 0.90)
             border.color: Qt.rgba(1.0, 1.0, 1.0, 0.2)
             border.width: 1
         }

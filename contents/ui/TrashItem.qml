@@ -18,11 +18,27 @@ Item {
     width: baseSize
     height: baseSize
 
-    transform: Scale {
-        origin.x: root.width / 2
-        origin.y: root.height
-        xScale: root.currentScale
-        yScale: root.currentScale
+    Item {
+        id: scalingWrapper
+        anchors.fill: parent
+
+        transform: Scale {
+            origin.x: scalingWrapper.width / 2
+            origin.y: scalingWrapper.height - 4
+            xScale: root.currentScale
+            yScale: root.currentScale
+        }
+
+        Kirigami.Icon {
+            id: trashIcon
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.topMargin: 2
+            width: root.baseSize * 0.82
+            height: root.baseSize * 0.82
+            source: root.isTrashFull ? "user-trash-full" : "user-trash"
+            smooth: true
+        }
     }
 
     Plasma5Support.DataSource {
@@ -96,15 +112,6 @@ Item {
                 drop.acceptProposedAction();
             }
         }
-    }
-
-    Kirigami.Icon {
-        id: trashIcon
-        anchors.centerIn: parent
-        width: parent.width * 0.82
-        height: parent.height * 0.82
-        source: root.isTrashFull ? "user-trash-full" : "user-trash"
-        smooth: true
     }
 
     MouseArea {
