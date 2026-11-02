@@ -11,6 +11,18 @@ Item {
     height: 6
 
     Rectangle {
+        id: dotShadow
+        anchors.centerIn: dot
+        anchors.verticalCenterOffset: 0.5
+        width: dot.width + 1
+        height: dot.height + 1
+        radius: height / 2
+        color: Qt.rgba(0, 0, 0, 0.4)
+        opacity: dot.opacity
+        z: dot.z - 1
+    }
+
+    Rectangle {
         id: dot
         anchors.centerIn: parent
         width: root.isFocused ? 10 : 4.5

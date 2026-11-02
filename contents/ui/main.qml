@@ -1,722 +1,296 @@
-/*
-    SPDX-FileCopyrightText: 2012-2016 Eike Hein <hein@kde.org>
-
-    SPDX-License-Identifier: GPL-2.0-or-later
-*/
-pragma ComponentBehavior: Bound
-
 import QtQuick
 import QtQuick.Layouts
-
+import QtQuick.Controls as QQC2
 import org.kde.plasma.plasmoid
-import org.kde.plasma.components as PlasmaComponents3
 import org.kde.plasma.core as PlasmaCore
-import org.kde.ksvg as KSvg
-import org.kde.plasma.private.mpris as Mpris
+import org.kde.plasma.plasma5support as Plasma5Support
 import org.kde.kirigami as Kirigami
-
-import org.kde.plasma.workspace.trianglemousefilter
-
 import org.kde.taskmanager as TaskManager
-import plasma.applet.org.kde.plasma.taskmanager as TaskManagerApplet
-import org.kde.plasma.workspace.dbus as DBus
 
 PlasmoidItem {
-    id: tasks
+    id: root
+
+    Plasmoid.backgroundHints: PlasmaCore.Types.NoBackground
+
+    // Plasma configuration bindings
+    readonly property bool enableMagnification: Plasmoid.configuration.enableMagnification !== undefined ? Plasmoid.configuration.enableMagnification : true
+    readonly property real magnificationMaxScale: Plasmoid.configuration.magnificationMaxScale || 1.45
+    readonly property real magnificationRadiusFactor: Plasmoid.configuration.magnificationRadiusFactor || 2.5
+    readonly property bool enableBounce: Plasmoid.configuration.enableBounce !== undefined ? Plasmoid.configuration.enableBounce : true
+    readonly property bool showRunningIndicator: Plasmoid.configuration.showRunningIndicator !== undefined ? Plasmoid.configuration.showRunningIndicator : true
+    readonly property bool enableMagicLamp: Plasmoid.configuration.enableMagicLamp !== undefined ? Plasmoid.configuration.enableMagicLamp : true
+
+    // Layout configuration in panel
+    readonly property bool inPanel: [
+        PlasmaCore.Types.TopEdge,
+        PlasmaCore.Types.RightEdge,
+        PlasmaCore.Types.BottomEdge,
+        PlasmaCore.Types.LeftEdge,
+    ].includes(Plasmoid.location)
+
+    readonly property bool vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
+    readonly property real cellHeight: inPanel ? (parent ? parent.height : 54) : 54
+    readonly property real cellWidth: cellHeight
+
+    Layout.fillHeight: !vertical
+    Layout.fillWidth: vertical
+    Layout.preferredWidth: vertical ? (parent ? parent.width : contentRow.implicitWidth) : contentRow.implicitWidth
+    Layout.minimumWidth: vertical ? 0 : contentRow.implicitWidth
+    Layout.preferredHeight: vertical ? contentRow.implicitHeight : (parent ? parent.height : 54)
+    Layout.minimumHeight: vertical ? contentRow.implicitHeight : 0
+
+    implicitWidth: vertical ? (parent ? parent.width : contentRow.implicitWidth) : contentRow.implicitWidth
+    implicitHeight: vertical ? contentRow.implicitHeight : (parent ? parent.height : 54)
+
     clip: false
 
-    // For making a bottom to top layout since qml flow can't do that.
-    // We just hang the task manager upside down to achieve that.
-    // This mirrors the tasks and group dialog as well, so we un-rotate them
-    // to fix that (see Task.qml and GroupDialog.qml).
-    rotation: Plasmoid.configuration.reverseMode && Plasmoid.formFactor === PlasmaCore.Types.Vertical ? 180 : 0
-
-    readonly property bool shouldShrinkToZero: tasksModel.count === 0
-    readonly property bool vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
-    readonly property bool iconsOnly: Plasmoid.pluginName === "org.kde.plasma.icontasks"
-
-    property Task toolTipOpenedByClick
-    property Task toolTipAreaItem
-
-    readonly property Component pulseAudioComponent: Qt.createComponent("PulseAudio.qml")
-
-    property alias taskList: taskList
-
-    preferredRepresentation: fullRepresentation
-
-    Plasmoid.constraintHints: Plasmoid.CanFillArea
-
-    Plasmoid.onUserConfiguringChanged: {
-        if (Plasmoid.userConfiguring && groupDialog !== null) {
-            groupDialog.visible = false;
+    // KWin Magic Lamp (macOS Genie effect) synchronization
+    Plasma5Support.DataSource {
+        id: kwinEffectRunner
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(sourceName, data) {
+            disconnectSource(sourceName);
         }
     }
 
-    Layout.fillWidth: vertical ? true : Plasmoid.configuration.fill
-    Layout.fillHeight: !vertical ? true : Plasmoid.configuration.fill
-    Layout.minimumWidth: {
-        if (shouldShrinkToZero) {
-            return Kirigami.Units.gridUnit; // For edit mode
+    function syncMagicLampEffect() {
+        if (root.enableMagicLamp) {
+            kwinEffectRunner.connectSource(
+                "kwriteconfig6 --file kwinrc --group Plugins --key magiclampEnabled true && " +
+                "kwriteconfig6 --file kwinrc --group Plugins --key scaleEnabled false && " +
+                "kwriteconfig6 --file kwinrc --group Plugins --key squashEnabled false && " +
+                "qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadEffect magiclamp 2>/dev/null &"
+            );
         }
-        return vertical ? 0 : TaskManagerApplet.LayoutMetrics.preferredMinWidth();
-    }
-    Layout.minimumHeight: {
-        if (shouldShrinkToZero) {
-            return Kirigami.Units.gridUnit; // For edit mode
-        }
-        return !vertical ? 0 : TaskManagerApplet.LayoutMetrics.preferredMinHeight();
     }
 
-//BEGIN TODO: this is not precise enough: launchers are smaller than full tasks
-    Layout.preferredWidth: {
-        if (shouldShrinkToZero) {
-            return 0.01;
-        }
-        if (vertical) {
-            return Kirigami.Units.gridUnit * 10;
-        }
-        return taskList.Layout.maximumWidth
+    Component.onCompleted: {
+        syncMagicLampEffect();
     }
-    Layout.preferredHeight: {
-        if (shouldShrinkToZero) {
-            return 0.01;
-        }
-        if (vertical) {
-            return taskList.Layout.maximumHeight
-        }
-        return Kirigami.Units.gridUnit * 2;
+
+    onEnableMagicLampChanged: {
+        syncMagicLampEffect();
     }
-//END TODO
 
-    property Item dragSource
-    property var hoveredWinIds
+    function getLaunchersList() {
+        var l = Plasmoid.configuration.launchers;
+        if (!l) return [];
+        if (Array.isArray(l)) return l;
+        if (typeof l === "string") return l.split(",").filter(function(s) { return s.length > 0; });
+        return [];
+    }
 
-    // macOS Dock Magnification Engine
+    TaskManager.TasksModel {
+        id: tasksModel
+
+        filterByVirtualDesktop: Plasmoid.configuration.showOnlyCurrentDesktop || false
+        filterByCurrentVirtualDesktop: Plasmoid.configuration.showOnlyCurrentDesktop || false
+        filterByActivity: Plasmoid.configuration.showOnlyCurrentActivity || true
+        filterByScreen: Plasmoid.configuration.showOnlyCurrentScreen || false
+
+        groupMode: TaskManager.TasksModel.GroupApplications
+        sortMode: TaskManager.TasksModel.SortManual
+
+        launcherList: root.getLaunchersList()
+
+        onLauncherListChanged: {
+            Plasmoid.configuration.launchers = launcherList;
+        }
+    }
+
+    // macOS Magnification Engine
     property real mouseTrackX: -1
     property bool isDockHovered: false
-    readonly property bool enableMagnification: Plasmoid.configuration.enableMagnification ?? true
-    readonly property real magnificationMaxScale: Plasmoid.configuration.magnificationMaxScale ?? 1.55
-    readonly property real magnificationRadiusFactor: Plasmoid.configuration.magnificationRadiusFactor ?? 2.5
-    readonly property bool enableBounce: Plasmoid.configuration.enableBounce ?? true
-    readonly property bool macosIndicators: Plasmoid.configuration.macosIndicators ?? true
 
-    readonly property MagnificationEngine magEngine: MagnificationEngine {
-        enabled: tasks.enableMagnification
-        maxScale: tasks.magnificationMaxScale
-        radiusFactor: tasks.magnificationRadiusFactor
-        mouseX: tasks.mouseTrackX
-        isHovered: tasks.isDockHovered
+    MagnificationEngine {
+        id: magEngine
+        enabled: root.enableMagnification
+        maxScale: root.magnificationMaxScale
+        radiusFactor: root.magnificationRadiusFactor
+        mouseX: root.mouseTrackX
+        isHovered: root.isDockHovered
     }
 
     HoverHandler {
         id: dockHoverHandler
         cursorShape: Qt.ArrowCursor
         onPointChanged: {
-            tasks.isDockHovered = hovered;
-            tasks.mouseTrackX = point.position.x;
+            root.isDockHovered = hovered;
+            root.mouseTrackX = point.position.x;
         }
         onHoveredChanged: {
-            tasks.isDockHovered = hovered;
+            root.isDockHovered = hovered;
             if (!hovered) {
-                tasks.mouseTrackX = -1;
+                root.mouseTrackX = -1;
+                tooltip.visible = false;
             }
         }
     }
 
-    signal requestLayout
-
-    onDragSourceChanged: {
-        if (dragSource === null) {
-            tasksModel.syncLaunchers();
-        }
-    }
-
-    function windowsHovered(winIds: var, hovered: bool): DBus.DBusPendingReply {
-        if (!Plasmoid.configuration.highlightWindows) {
-            return;
-        }
-        // If the hover leave event comes after something else was already hovered, don't cancel the new highlight
-        if (!hovered && !(winIds.every(winId => hoveredWinIds.includes(winId)) &&
-                          hoveredWinIds.every(winId => winIds.includes(winId)))) {
-            return
-        }
-        hoveredWinIds = winIds
-
-        return DBus.SessionBus.asyncCall({service: "org.kde.KWin.HighlightWindow", path: "/org/kde/KWin/HighlightWindow", iface: "org.kde.KWin.HighlightWindow", member: "highlightWindows", arguments: [hovered ? winIds : []], signature: "(as)"});
-    }
-
-    function cancelHighlightWindows(): DBus.DBusPendingReply {
-        return DBus.SessionBus.asyncCall({service: "org.kde.KWin.HighlightWindow", path: "/org/kde/KWin/HighlightWindow", iface: "org.kde.KWin.HighlightWindow", member: "highlightWindows", arguments: [[]], signature: "(as)"});
-    }
-
-    function activateWindowView(winIds: var): DBus.DBusPendingReply {
-        if (!effectWatcher.registered) {
-            return;
-        }
-        cancelHighlightWindows();
-        return DBus.SessionBus.asyncCall({service: "org.kde.KWin.Effect.WindowView1", path: "/org/kde/KWin/Effect/WindowView1", iface: "org.kde.KWin.Effect.WindowView1", member: "activate", arguments: [winIds.map(s => String(s))], signature: "(as)"});
-    }
-
-    function publishIconGeometries(taskItems: /*list<Item>*/var): void {
-        if (TaskManagerApplet.TaskTools.taskManagerInstanceCount >= 2) {
-            return;
-        }
-        for (let i = 0; i < taskItems.length - 1; ++i) {
-            const task = taskItems[i];
-
-            if (!task.model.IsLauncher && !task.model.IsStartup) {
-                tasksModel.requestPublishDelegateGeometry(tasksModel.makeModelIndex(task.index),
-                    backend.globalRect(task), task);
-            }
-        }
-    }
-
-    readonly property TaskManager.TasksModel tasksModel: TaskManager.TasksModel {
-        id: tasksModel
-
-        readonly property int logicalLauncherCount: {
-            if (Plasmoid.configuration.separateLaunchers) {
-                return launcherCount;
-            }
-
-            let startupsWithLaunchers = 0;
-
-            for (let i = 0; i < taskRepeater.count; ++i) {
-                const item = taskRepeater.itemAt(i) as Task;
-
-                // During destruction required properties such as item.model can go null for a while,
-                // so in paths that can trigger on those moments, they need to be guarded
-                if (item?.model?.IsStartup && item.model.HasLauncher) {
-                    ++startupsWithLaunchers;
-                }
-            }
-
-            return launcherCount + startupsWithLaunchers;
-        }
-
-        screenGeometry: Plasmoid.containment.screenGeometry
-        activity: activityInfo.currentActivity
-
-        filterByCurrentVirtualDesktop: Plasmoid.configuration.showOnlyCurrentDesktop
-        filterByScreen: Plasmoid.configuration.showOnlyCurrentScreen
-        filterByActivity: Plasmoid.configuration.showOnlyCurrentActivity
-        filterNotMinimized: Plasmoid.configuration.showOnlyMinimized
-
-        hideActivatedLaunchers: tasks.iconsOnly || Plasmoid.configuration.hideLauncherOnStart
-        sortMode: sortModeEnumValue(Plasmoid.configuration.sortingStrategy)
-        launchInPlace: tasks.iconsOnly && Plasmoid.configuration.sortingStrategy === 1
-        separateLaunchers: {
-            if (!tasks.iconsOnly && !Plasmoid.configuration.separateLaunchers
-                && Plasmoid.configuration.sortingStrategy === 1) {
-                return false;
-            }
-
-            return true;
-        }
-
-        groupMode: groupModeEnumValue(Plasmoid.configuration.groupingStrategy)
-        groupInline: !Plasmoid.configuration.groupPopups && !tasks.iconsOnly
-        groupingWindowTasksThreshold: (Plasmoid.configuration.onlyGroupWhenFull && !tasks.iconsOnly
-            ? TaskManagerApplet.LayoutMetrics.optimumCapacity(tasks.width, tasks.height) + 1 : -1)
-
-        onLauncherListChanged: {
-            Plasmoid.configuration.launchers = launcherList;
-        }
-
-        onGroupingAppIdBlacklistChanged: {
-            Plasmoid.configuration.groupingAppIdBlacklist = groupingAppIdBlacklist;
-        }
-
-        onGroupingLauncherUrlBlacklistChanged: {
-            Plasmoid.configuration.groupingLauncherUrlBlacklist = groupingLauncherUrlBlacklist;
-        }
-
-        function sortModeEnumValue(index: int): /*TaskManager.TasksModel.SortMode*/ int {
-            switch (index) {
-            case 0:
-                return TaskManager.TasksModel.SortDisabled;
-            case 1:
-                return TaskManager.TasksModel.SortManual;
-            case 2:
-                return TaskManager.TasksModel.SortAlpha;
-            case 3:
-                return TaskManager.TasksModel.SortVirtualDesktop;
-            case 4:
-                return TaskManager.TasksModel.SortActivity;
-            // 5 is SortLastActivated, skipped
-            case 6:
-                return TaskManager.TasksModel.SortWindowPositionHorizontal;
-            default:
-                return TaskManager.TasksModel.SortDisabled;
-            }
-        }
-
-        function groupModeEnumValue(index: int): /*TaskManager.TasksModel.GroupMode*/ int {
-            switch (index) {
-            case 0:
-                return TaskManager.TasksModel.GroupDisabled;
-            case 1:
-                return TaskManager.TasksModel.GroupApplications;
-            }
-        }
-
-        Component.onCompleted: {
-            launcherList = Plasmoid.configuration.launchers;
-            groupingAppIdBlacklist = Plasmoid.configuration.groupingAppIdBlacklist;
-            groupingLauncherUrlBlacklist = Plasmoid.configuration.groupingLauncherUrlBlacklist;
-
-            // Only hook up view only after the above churn is done.
-            taskRepeater.model = tasksModel;
-        }
-    }
-
-    readonly property TaskManagerApplet.Backend backend: TaskManagerApplet.Backend {
-        id: backend
-
-        screen: Plasmoid.screen ?? -1
-        hasActiveTask: tasksModel.count > 0 && tasksModel.activeTask.valid
-        showsOnlyCurrentScreen: Plasmoid.configuration.showOnlyCurrentScreen
-
-        onAddLauncher: url => {
-            tasks.addLauncher(url);
-        }
-
-        onActivateTaskAtIndexRequested: index => {
-            tasks.activateTaskAtIndex(index);
-        }
-
-        onActivatePreviousTaskRequested: () => {
-            tasks.activatePreviousTask();
-        }
-
-        onActivateNextTaskRequested: () => {
-            tasks.activateNextTask();
-        }
-
-        onMoveActiveTaskBackwardRequested: () => {
-            tasks.moveActiveTaskBackward();
-        }
-
-        onMoveActiveTaskForwardRequested: () => {
-            tasks.moveActiveTaskForward();
-        }
-    }
-
-    DBus.DBusServiceWatcher {
-        id: effectWatcher
-        busType: DBus.BusType.Session
-        watchedService: "org.kde.KWin.Effect.WindowView1"
-    }
-
-    readonly property Component taskInitComponent: Component {
-        Timer {
-            interval: 200
-            running: true
-
-            onTriggered: {
-                const task = parent as Task;
-                if (task) {
-                    tasks.tasksModel.requestPublishDelegateGeometry(task.modelIndex(), tasks.backend.globalRect(task), task);
-                }
-                destroy();
-            }
-        }
-    }
-
-    Connections {
-        target: Plasmoid
-
-        function onLocationChanged(): void {
-            if (TaskManagerApplet.TaskTools.taskManagerInstanceCount >= 2) {
-                return;
-            }
-            // This is on a timer because the panel may not have
-            // settled into position yet when the location prop-
-            // erty updates.
-            iconGeometryTimer.start();
-        }
-    }
-
-    Connections {
-        target: Plasmoid.containment
-
-        function onScreenGeometryChanged(): void {
-            iconGeometryTimer.start();
-        }
-    }
-
-    Mpris.Mpris2Model {
-        id: mpris2Source
-    }
-
-    Component {
-        id: contextMenuComponent
-        ContextMenu {}
-    }
-
-    Item {
-        anchors.fill: parent
+    Row {
+        id: contentRow
+        anchors.centerIn: parent
+        spacing: 2
         clip: false
 
-        TaskManager.VirtualDesktopInfo {
-            id: virtualDesktopInfo
+        Repeater {
+            id: tasksRepeater
+            model: tasksModel
+
+            delegate: DockItem {
+                id: taskDelegate
+
+                tasksModelRef: tasksModel
+                modelIndexVal: index
+
+                baseSize: root.cellHeight
+                appName: model.AppName || model.display || ""
+                iconSource: model.decoration
+                launcherUrl: model.LauncherUrl || ""
+                isRunning: model.IsWindow === true
+                isFocused: model.IsActive === true
+                isMinimized: model.IsMinimized === true
+                isStartup: model.IsStartup === true
+                demandsAttention: model.IsDemandingAttention === true
+                badgeNumber: 0
+
+                currentScale: {
+                    if (!root.enableMagnification || !root.isDockHovered || root.mouseTrackX < 0) {
+                        return 1.0;
+                    }
+                    var centerInRoot = contentRow.x + taskDelegate.x + taskDelegate.width / 2.0;
+                    return magEngine.calculateScale(centerInRoot, root.cellHeight);
+                }
+
+                onActivated: {
+                    var idx = tasksModel.makeModelIndex(index);
+                    if (taskDelegate.isFocused) {
+                        tasksModel.requestToggleMinimized(idx);
+                    } else {
+                        tasksModel.requestActivate(idx);
+                    }
+                }
+
+                onLaunchTriggered: {
+                    var idx = tasksModel.makeModelIndex(index);
+                    tasksModel.requestActivate(idx);
+                }
+
+                onContextRequested: function(gx, gy) {
+                    contextMenu.targetIndex = index;
+                    contextMenu.appName = taskDelegate.appName;
+                    contextMenu.launcherUrl = taskDelegate.launcherUrl;
+                    contextMenu.isPinned = model.IsLauncher === true;
+                    contextMenu.isRunning = model.IsWindow === true;
+                    contextMenu.popup();
+                }
+
+                HoverHandler {
+                    id: itemHover
+                    onPointChanged: {
+                        if (hovered) {
+                            var p = taskDelegate.mapToItem(root, point.position.x, point.position.y);
+                            root.isDockHovered = true;
+                            root.mouseTrackX = p.x;
+
+                            var pos = taskDelegate.mapToItem(root, taskDelegate.width / 2, 0);
+                            tooltip.x = pos.x - tooltip.width / 2;
+                            tooltip.y = -root.cellHeight * (taskDelegate.currentScale - 1.0) - tooltip.height - 8;
+                            tooltip.text = taskDelegate.appName;
+                            tooltip.visible = true;
+                        }
+                    }
+                    onHoveredChanged: {
+                        if (!hovered) {
+                            tooltip.visible = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // macOS Style Floating Capsule Tooltip
+    Rectangle {
+        id: tooltip
+        visible: false
+        z: 999
+        property alias text: tooltipLabel.text
+
+        implicitWidth: tooltipLabel.implicitWidth + 20
+        implicitHeight: tooltipLabel.implicitHeight + 8
+        radius: height / 2
+        color: Qt.rgba(0.08, 0.09, 0.11, 0.88)
+        border.color: Qt.rgba(1.0, 1.0, 1.0, 0.2)
+        border.width: 1
+
+        Text {
+            id: tooltipLabel
+            anchors.centerIn: parent
+            color: "#FFFFFF"
+            font.pixelSize: 11
+            font.weight: Font.Medium
+            renderType: Text.NativeRendering
+        }
+    }
+
+    // Context Menu for tasks
+    QQC2.Menu {
+        id: contextMenu
+        property int targetIndex: -1
+        property string appName: ""
+        property string launcherUrl: ""
+        property bool isPinned: false
+        property bool isRunning: false
+
+        QQC2.MenuItem {
+            text: contextMenu.appName
+            font.weight: Font.DemiBold
+            enabled: false
         }
 
-        TaskManager.ActivityInfo {
-            id: activityInfo
-            readonly property string nullUuid: "00000000-0000-0000-0000-000000000000"
+        QQC2.MenuSeparator {}
+
+        QQC2.Menu {
+            title: i18n("Options")
+
+            QQC2.MenuItem {
+                text: i18n("Keep in Dock")
+                checkable: true
+                checked: contextMenu.isPinned
+                onTriggered: {
+                    var idx = tasksModel.makeModelIndex(contextMenu.targetIndex);
+                    if (contextMenu.isPinned) {
+                        tasksModel.requestRemoveLauncher(contextMenu.launcherUrl);
+                    } else {
+                        tasksModel.requestAddLauncher(contextMenu.launcherUrl);
+                    }
+                }
+            }
+
+            QQC2.MenuItem {
+                text: i18n("Open New Window")
+                icon.name: "window-new"
+                onTriggered: {
+                    var idx = tasksModel.makeModelIndex(contextMenu.targetIndex);
+                    tasksModel.requestNewInstance(idx);
+                }
+            }
         }
 
-        Loader {
-            id: pulseAudio
-            sourceComponent: tasks.pulseAudioComponent
-            active: tasks.pulseAudioComponent.status === Component.Ready
+        QQC2.MenuSeparator {
+            visible: contextMenu.isRunning
         }
 
-        Timer {
-            id: iconGeometryTimer
-
-            interval: 500
-            repeat: false
-
+        QQC2.MenuItem {
+            text: i18n("Close")
+            icon.name: "window-close"
+            visible: contextMenu.isRunning
             onTriggered: {
-                tasks.publishIconGeometries(taskList.children, tasks);
+                var idx = tasksModel.makeModelIndex(contextMenu.targetIndex);
+                tasksModel.requestClose(idx);
             }
         }
-
-        Binding {
-            target: Plasmoid
-            property: "status"
-            value: (tasksModel.anyTaskDemandsAttention && Plasmoid.configuration.unhideOnAttention
-                ? PlasmaCore.Types.NeedsAttentionStatus : PlasmaCore.Types.PassiveStatus)
-            restoreMode: Binding.RestoreBinding
-        }
-
-        Connections {
-            target: Plasmoid.configuration
-
-            function onLaunchersChanged(): void {
-                tasksModel.launcherList = Plasmoid.configuration.launchers
-            }
-            function onGroupingAppIdBlacklistChanged(): void {
-                tasksModel.groupingAppIdBlacklist = Plasmoid.configuration.groupingAppIdBlacklist;
-            }
-            function onGroupingLauncherUrlBlacklistChanged(): void {
-                tasksModel.groupingLauncherUrlBlacklist = Plasmoid.configuration.groupingLauncherUrlBlacklist;
-            }
-        }
-
-        Component {
-            id: busyIndicator
-            PlasmaComponents3.BusyIndicator {}
-        }
-
-        // Save drag data
-        Item {
-            id: dragHelper
-
-            Drag.dragType: Drag.Automatic
-            Drag.supportedActions: Qt.CopyAction | Qt.MoveAction | Qt.LinkAction
-            Drag.onDragFinished: dropAction => {
-                tasks.dragSource = null;
-            }
-        }
-
-        KSvg.FrameSvgItem {
-            id: taskFrame
-
-            visible: false
-
-            imagePath: "widgets/tasks"
-            prefix: TaskManagerApplet.TaskTools.taskPrefix("normal", Plasmoid.location)
-        }
-
-        MouseHandler {
-            id: mouseHandler
-
-            anchors.fill: parent
-
-            target: taskList
-
-            onUrlsDropped: urls => {
-                // If all dropped URLs point to application desktop files, we'll add a launcher for each of them.
-                const createLaunchers = urls.every(item => tasks.backend.isApplication(item));
-
-                if (createLaunchers) {
-                    urls.forEach(item => addLauncher(item));
-                    return;
-                }
-
-                if (!hoveredItem) {
-                    return;
-                }
-
-                // Otherwise we'll just start a new instance of the application with the URLs as argument,
-                // as you probably don't expect some of your files to open in the app and others to spawn launchers.
-                tasksModel.requestOpenUrls((hoveredItem as Task).modelIndex(), urls);
-            }
-        }
-
-        ToolTipDelegate {
-            id: openWindowToolTipDelegate
-            visible: false
-        }
-
-        ToolTipDelegate {
-            id: pinnedAppToolTipDelegate
-            visible: false
-        }
-
-        TriangleMouseFilter {
-            id: tmf
-            filterTimeOut: 300
-            active: tasks.toolTipAreaItem && tasks.toolTipAreaItem.toolTipOpen
-            blockFirstEnter: false
-
-            edge: {
-                switch (Plasmoid.location) {
-                case PlasmaCore.Types.BottomEdge:
-                    return Qt.TopEdge;
-                case PlasmaCore.Types.TopEdge:
-                    return Qt.BottomEdge;
-                case PlasmaCore.Types.LeftEdge:
-                    return Qt.RightEdge;
-                case PlasmaCore.Types.RightEdge:
-                    return Qt.LeftEdge;
-                default:
-                    return Qt.TopEdge;
-                }
-            }
-
-            LayoutMirroring.enabled: tasks.shouldBeMirrored(Plasmoid.configuration.reverseMode, Application.layoutDirection, tasks.vertical)
-            anchors {
-                left: parent.left
-                top: parent.top
-            }
-
-            height: taskList.height
-            width: taskList.width
-            clip: false
-
-            TaskList {
-                id: taskList
-                clip: false
-
-                LayoutMirroring.enabled: tasks.shouldBeMirrored(Plasmoid.configuration.reverseMode, Application.layoutDirection, tasks.vertical)
-                anchors {
-                    left: parent.left
-                    top: parent.top
-                }
-
-                count: tasksModel.count
-
-                readonly property real widthOccupation: taskRepeater.count / columns
-                readonly property real heightOccupation: taskRepeater.count / rows
-
-                Layout.maximumWidth: {
-                    const totalMaxWidth = children.reduce((accumulator, child) => {
-                            if (!isFinite(child.Layout.maximumWidth)) {
-                                return accumulator;
-                            }
-                            return accumulator + child.Layout.maximumWidth
-                        }, 0);
-                    return Math.round(totalMaxWidth / widthOccupation);
-                }
-                Layout.maximumHeight: {
-                    const totalMaxHeight = children.reduce((accumulator, child) => {
-                            if (!isFinite(child.Layout.maximumHeight)) {
-                                return accumulator;
-                            }
-                            return accumulator + child.Layout.maximumHeight
-                        }, 0);
-                    return Math.round(totalMaxHeight / heightOccupation);
-                }
-                width: {
-                    if (tasks.shouldShrinkToZero) {
-                        return 0;
-                    }
-                    if (tasks.vertical) {
-                        return tasks.width * Math.min(1, widthOccupation);
-                    } else {
-                        return Math.min(tasks.width, Layout.maximumWidth);
-                    }
-                }
-                height: {
-                    if (tasks.shouldShrinkToZero) {
-                        return 0;
-                    }
-                    if (tasks.vertical) {
-                        return Math.min(tasks.height, Layout.maximumHeight);
-                    } else {
-                        return tasks.height * Math.min(1, heightOccupation);
-                    }
-                }
-
-                flow: {
-                    if (tasks.vertical) {
-                        return Plasmoid.configuration.forceStripes ? Grid.LeftToRight : Grid.TopToBottom
-                    }
-                    return Plasmoid.configuration.forceStripes ? Grid.TopToBottom : Grid.LeftToRight
-                }
-
-                onAnimatingChanged: {
-                    if (!animating) {
-                        tasks.publishIconGeometries(children, tasks);
-                    }
-                }
-
-                Repeater {
-                    id: taskRepeater
-
-                    delegate: Task {
-                        tasksRoot: tasks
-                    }
-                }
-            }
-        }
-    }
-
-    readonly property Component groupDialogComponent: Qt.createComponent("GroupDialog.qml")
-    property GroupDialog groupDialog
-
-    readonly property bool supportsLaunchers: true
-
-    function hasLauncher(url: url): bool {
-        return tasksModel.launcherPosition(url) !== -1;
-    }
-
-    function addLauncher(url: url): void {
-        if (Plasmoid.immutability !== PlasmaCore.Types.SystemImmutable) {
-            tasksModel.requestAddLauncher(url);
-        }
-    }
-
-    function removeLauncher(url: url): void {
-        if (Plasmoid.immutability !== PlasmaCore.Types.SystemImmutable) {
-            tasksModel.requestRemoveLauncher(url);
-        }
-    }
-
-    function activateTaskAtIndex(index: int): void {
-        const task = taskRepeater.itemAt(index) as Task;
-        if (task) {
-            TaskManagerApplet.TaskTools.activateTask(task.modelIndex(), task.model, null, task, Plasmoid, this, effectWatcher.registered);
-        }
-    }
-
-    // Shared helpers for activatePreviousTask/activateNextTask.
-
-    function buildFlatTaskList() {
-        const count = taskRepeater.count;
-        if (count === 0) return [];
-
-        let taskIndexList = [];
-        for (let i = 0; i < count; ++i) {
-            const item = taskRepeater.itemAt(i);
-            if (!item || item.model.IsLauncher || item.model.IsStartup) continue;
-
-            if (item.model.IsGroupParent) {
-                for (let j = 0; j < tasksModel.rowCount(item.modelIndex()); ++j) {
-                    taskIndexList.push(tasksModel.makeModelIndex(i, j));
-                }
-            } else if (item.model.IsWindow) {
-                taskIndexList.push(item.modelIndex());
-            }
-        }
-        return taskIndexList;
-    }
-
-    function findActivePosition(taskIndexList): int {
-        for (let i = 0; i < taskIndexList.length; ++i) {
-            if (tasksModel.data(taskIndexList[i], TaskManager.AbstractTasksModel.IsActive)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    function activatePreviousTask(): void {
-        const taskIndexList = buildFlatTaskList();
-        if (taskIndexList.length === 0) return;
-
-        const activePos = findActivePosition(taskIndexList);
-        if (activePos < 0) return;
-
-        const prevPos = (activePos - 1 + taskIndexList.length) % taskIndexList.length;
-        tasksModel.requestActivate(taskIndexList[prevPos]);
-    }
-
-    function activateNextTask(): void {
-        const taskIndexList = buildFlatTaskList();
-        if (taskIndexList.length === 0) return;
-
-        const activePos = findActivePosition(taskIndexList);
-        if (activePos < 0) return;
-
-        const nextPos = (activePos + 1) % taskIndexList.length;
-        tasksModel.requestActivate(taskIndexList[nextPos]);
-    }
-
-    // Shared helper for moveActiveTaskBackward/moveActiveTaskForward.
-
-    function getActiveRow(): int {
-        if (tasksModel.count === 0) return -1;
-
-        // Switch to manual sorting via the config so the binding and the
-        // settings UI stay in sync.
-        Plasmoid.configuration.sortingStrategy = 1; // Manual
-
-        // Find the active task's top-level row from the now-resorted model.
-        const activeModelIndex = tasksModel.activeTask;
-        if (!activeModelIndex.valid) return -1;
-
-        // If the active task is a group child, find its parent's row.
-        const parentIndex = activeModelIndex.parent;
-        return parentIndex.valid ? parentIndex.row : activeModelIndex.row;
-    }
-
-    function moveActiveTaskBackward(): void {
-        const activeRow = getActiveRow();
-        if (activeRow <= 0) return; // Already leftmost
-
-        tasksModel.move(activeRow, activeRow - 1);
-    }
-
-    function moveActiveTaskForward(): void {
-        const activeRow = getActiveRow();
-        if (activeRow < 0 || activeRow >= tasksModel.count - 1) return; // Already rightmost
-
-        tasksModel.move(activeRow, activeRow + 1);
-    }
-
-    function createContextMenu(rootTask, modelIndex, args = {}) {
-        const initialArgs = Object.assign(args, {
-            visualParent: rootTask,
-            modelIndex,
-            mpris2Source,
-            backend,
-        });
-        return contextMenuComponent.createObject(rootTask, initialArgs);
-    }
-
-    function shouldBeMirrored(reverseMode, layoutDirection, vertical): bool {
-        // LayoutMirroring is only horizontal
-        if (vertical) {
-            return layoutDirection === Qt.RightToLeft;
-        }
-
-        if (layoutDirection === Qt.LeftToRight) {
-            return reverseMode;
-        }
-        return !reverseMode;
-    }
-
-    Component.onCompleted: {
-        TaskManagerApplet.TaskTools.taskManagerInstanceCount += 1;
-        requestLayout.connect(iconGeometryTimer.restart);
-    }
-
-    Component.onDestruction: {
-        TaskManagerApplet.TaskTools.taskManagerInstanceCount -= 1;
     }
 }

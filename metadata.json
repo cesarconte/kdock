@@ -8,17 +8,16 @@
             }
         ],
         "Category": "Windows and Tasks",
-        "Description": "macOS Sequoia-style Dock for KDE Plasma 6 Panel with smooth parabolic magnification and native dot indicators",
+        "Description": "macOS Sequoia-style Dock applet for KDE Plasma 6 Panel with parabolic magnification, bounce animations, and macOS dot indicators",
         "Icon": "preferences-system-windows",
-        "Id": "org.kde.plasma.icontasks",
+        "Id": "org.cesar.kdock",
         "License": "GPL-3.0+",
-        "Name": "Icons-Only Task Manager",
-        "Version": "6.8.2",
+        "Name": "kDock",
+        "Version": "1.0.0",
         "Website": "https://github.com/cesarconte/kdock"
     },
     "X-Plasma-API-Minimum-Version": "6.0",
     "X-Plasma-Provides": [
         "org.kde.plasma.multitasking"
-    ],
-    "X-Plasma-RootPath": "org.kde.plasma.taskmanager"
+    ]
 }

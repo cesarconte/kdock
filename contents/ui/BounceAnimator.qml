@@ -8,19 +8,14 @@ Item {
     property int maxBounces: 3
     property real maxBounceHeight: 20
     property real currentYOffset: 0
-    property real shadowOpacity: Math.max(0.2, 1.0 - (-currentYOffset / maxBounceHeight))
-    property real shadowScale: Math.max(0.5, 1.0 - (-currentYOffset / (maxBounceHeight * 1.5)))
+    property real shadowOpacity: Math.max(0.2, 1.0 - (-currentYOffset / Math.max(1, maxBounceHeight)))
+    property real shadowScale: Math.max(0.5, 1.0 - (-currentYOffset / Math.max(1, maxBounceHeight * 1.5)))
 
     signal finished()
 
-    property int bounceIndex: 0
-
     function startBounce(isContinuous) {
         continuous = isContinuous;
-        bounceIndex = 0;
         active = true;
-        bounceUp.from = 0;
-        bounceUp.to = -maxBounceHeight;
         bounceAnim.restart();
     }
 
@@ -34,45 +29,30 @@ Item {
     SequentialAnimation {
         id: bounceAnim
         running: false
-        loops: root.continuous ? Animation.Infinite : 1
+        loops: root.continuous ? Animation.Infinite : root.maxBounces
 
-        SequentialAnimation {
-            id: singleCycle
+        NumberAnimation {
+            target: root
+            property: "currentYOffset"
+            from: 0
+            to: -root.maxBounceHeight
+            duration: 220
+            easing.type: Easing.OutQuad
+        }
 
-            NumberAnimation {
-                id: bounceUp
-                target: root
-                property: "currentYOffset"
-                duration: 220
-                easing.type: Easing.OutQuad
-            }
+        NumberAnimation {
+            target: root
+            property: "currentYOffset"
+            from: -root.maxBounceHeight
+            to: 0
+            duration: 200
+            easing.type: Easing.InQuad
+        }
 
-            NumberAnimation {
-                id: bounceDown
-                target: root
-                property: "currentYOffset"
-                from: bounceUp.to
-                to: 0
-                duration: 200
-                easing.type: Easing.InQuad
-            }
-
-            ScriptAction {
-                script: {
-                    if (!root.continuous) {
-                        root.bounceIndex++;
-                        if (root.bounceIndex >= root.maxBounces) {
-                            root.active = false;
-                            root.finished();
-                        } else {
-                            var dampFactor = Math.pow(0.65, root.bounceIndex);
-                            bounceUp.to = -root.maxBounceHeight * dampFactor;
-                            bounceDown.from = bounceUp.to;
-                            bounceAnim.restart();
-                        }
-                    }
-                }
-            }
+        onFinished: {
+            root.currentYOffset = 0;
+            root.active = false;
+            root.finished();
         }
     }
 }
